@@ -1,0 +1,266 @@
+name: Deploy Stock Reports to GitHub Pages
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Generate Static Site
+        run: |
+          python3 << 'EOF'
+          import os
+          import re
+          from datetime import datetime
+          
+          # 创建输出目录
+          os.makedirs('_site', exist_ok=True)
+          os.makedirs('_site/2026-02', exist_ok=True)
+          
+          # 生成首页
+          index_html = '''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>股市早报 - Stock Reports</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            color: white;
+        }
+        .header h1 {
+            font-size: 3em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+        .report-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        .report-card {
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            transition: transform 0.3s, box-shadow 0.3s;
+            cursor: pointer;
+            text-decoration: none;
+            color: inherit;
+        }
+        .report-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .report-date {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 8px;
+        }
+        .report-title {
+            font-size: 1.4em;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 12px;
+        }
+        .report-summary {
+            color: #666;
+            line-height: 1.6;
+            font-size: 0.95em;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            font-weight: bold;
+            margin-top: 12px;
+        }
+        .badge-morning {
+            background: #ff6b6b;
+            color: white;
+        }
+        .badge-evening {
+            background: #4ecdc4;
+            color: white;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 60px;
+            color: white;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📈 股市早报</h1>
+            <p>每日股市分析与投资策略</p>
+        </div>
+        <div class="report-grid">
+'''
+          
+          # 扫描所有报告文件
+          reports = []
+          for root, dirs, files in os.walk('.'):
+              for file in files:
+                  if file.endswith('.md') and ('早报' in file or '晚报' in file):
+                      filepath = os.path.join(root, file)
+                      with open(filepath, 'r', encoding='utf-8') as f:
+                          content = f.read()
+                      
+                      # 提取日期和标题
+                      date_match = re.search(r'(\d{4}-\d{2}-\d{2})', file)
+                      date = date_match.group(1) if date_match else 'Unknown'
+                      
+                      # 提取摘要（前200字）
+                      summary = re.sub(r'#.*?\n', '', content).strip()[:200] + '...'
+                      
+                      # 判断早报还是晚报
+                      is_morning = '早报' in file
+                      
+                      reports.append({
+                          'date': date,
+                          'title': f'股市{"早报" if is_morning else "晚报"} - {date}',
+                          'summary': summary,
+                          'file': filepath,
+                          'is_morning': is_morning
+                      })
+          
+          # 按日期排序
+          reports.sort(key=lambda x: x['date'], reverse=True)
+          
+          # 生成报告卡片
+          for report in reports[:20]:  # 只显示最近20期
+              badge_class = 'badge-morning' if report['is_morning'] else 'badge-evening'
+              badge_text = '早报' if report['is_morning'] else '晚报'
+              
+              index_html += f'''
+            <a href="{report['file']}" class="report-card">
+                <div class="report-date">{report['date']}</div>
+                <div class="report-title">{report['title']}</div>
+                <div class="report-summary">{report['summary']}</div>
+                <span class="badge {badge_class}">{badge_text}</span>
+            </a>
+'''
+          
+          index_html += '''
+        </div>
+        <div class="footer">
+            <p>© 2026 Stock Reports | Generated by AI Agent</p>
+        </div>
+    </div>
+</body>
+</html>
+'''
+          
+          # 保存首页
+          with open('_site/index.html', 'w', encoding='utf-8') as f:
+              f.write(index_html)
+          
+          # 复制所有markdown文件并转换为HTML
+          for root, dirs, files in os.walk('.'):
+              for file in files:
+                  if file.endswith('.md'):
+                      src = os.path.join(root, file)
+                      dst_dir = os.path.join('_site', root)
+                      os.makedirs(dst_dir, exist_ok=True)
+                      
+                      # 简单markdown转HTML
+                      with open(src, 'r', encoding='utf-8') as f:
+                          md_content = f.read()
+                      
+                      html_content = f'''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{file.replace('.md', '')}</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            line-height: 1.8;
+            color: #333;
+        }}
+        h1 {{ color: #667eea; border-bottom: 3px solid #667eea; padding-bottom: 10px; }}
+        h2 {{ color: #764ba2; margin-top: 30px; }}
+        h3 {{ color: #555; }}
+        table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
+        th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
+        th {{ background: #667eea; color: white; }}
+        tr:nth-child(even) {{ background: #f9f9f9; }}
+        code {{ background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }}
+        pre {{ background: #f4f4f4; padding: 15px; border-radius: 8px; overflow-x: auto; }}
+        a {{ color: #667eea; }}
+        .back {{ margin-bottom: 20px; }}
+    </style>
+</head>
+<body>
+    <div class="back"><a href="/">← 返回首页</a></div>
+    <pre>{md_content}</pre>
+</body>
+</html>'''
+                      
+                      dst = os.path.join(dst_dir, file.replace('.md', '.html'))
+                      with open(dst, 'w', encoding='utf-8') as f:
+                          f.write(html_content)
+          
+          print("Static site generated successfully!")
+          EOF
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '_site'
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
