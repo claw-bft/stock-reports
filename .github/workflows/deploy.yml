@@ -26,140 +26,47 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install dependencies
+        run: pip install markdown
+
       - name: Generate Static Site
         run: |
           python3 << 'EOF'
           import os
           import re
+          import markdown
           from datetime import datetime
           
           # 创建输出目录
           os.makedirs('_site', exist_ok=True)
-          os.makedirs('_site/2026-02', exist_ok=True)
           
-          # 生成首页
-          index_html = '''<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>股市早报 - Stock Reports</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 40px 20px;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        .header {
-            text-align: center;
-            margin-bottom: 40px;
-            color: white;
-        }
-        .header h1 {
-            font-size: 3em;
-            margin-bottom: 10px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-        }
-        .header p {
-            font-size: 1.2em;
-            opacity: 0.9;
-        }
-        .report-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-            gap: 20px;
-        }
-        .report-card {
-            background: white;
-            border-radius: 16px;
-            padding: 24px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-            transition: transform 0.3s, box-shadow 0.3s;
-            cursor: pointer;
-            text-decoration: none;
-            color: inherit;
-        }
-        .report-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-        }
-        .report-date {
-            font-size: 0.9em;
-            color: #666;
-            margin-bottom: 8px;
-        }
-        .report-title {
-            font-size: 1.4em;
-            font-weight: bold;
-            color: #333;
-            margin-bottom: 12px;
-        }
-        .report-summary {
-            color: #666;
-            line-height: 1.6;
-            font-size: 0.95em;
-        }
-        .badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.8em;
-            font-weight: bold;
-            margin-top: 12px;
-        }
-        .badge-morning {
-            background: #ff6b6b;
-            color: white;
-        }
-        .badge-evening {
-            background: #4ecdc4;
-            color: white;
-        }
-        .footer {
-            text-align: center;
-            margin-top: 60px;
-            color: white;
-            opacity: 0.8;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>📈 股市早报</h1>
-            <p>每日股市分析与投资策略</p>
-        </div>
-        <div class="report-grid">
-'''
-          
-          # 扫描所有报告文件
+          # 收集所有报告
           reports = []
           for root, dirs, files in os.walk('.'):
+              if '.git' in root or '_site' in root:
+                  continue
               for file in files:
                   if file.endswith('.md') and ('早报' in file or '晚报' in file):
                       filepath = os.path.join(root, file)
                       with open(filepath, 'r', encoding='utf-8') as f:
                           content = f.read()
                       
-                      # 提取日期和标题
+                      # 提取日期
                       date_match = re.search(r'(\d{4}-\d{2}-\d{2})', file)
                       date = date_match.group(1) if date_match else 'Unknown'
                       
-                      # 提取摘要（前200字）
-                      summary = re.sub(r'#.*?\n', '', content).strip()[:200] + '...'
+                      # 提取标题
+                      title_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+                      title = title_match.group(1) if title_match else file.replace('.md', '')
                       
-                      # 判断早报还是晚报
+                      # 提取摘要
+                      summary = re.sub(r'#.*?\n', '', content).strip()[:150] + '...'
+                      
                       is_morning = '早报' in file
                       
                       reports.append({
                           'date': date,
-                          'title': f'股市{"早报" if is_morning else "晚报"} - {date}',
+                          'title': title,
                           'summary': summary,
                           'file': filepath,
                           'is_morning': is_morning
@@ -168,85 +75,417 @@ jobs:
           # 按日期排序
           reports.sort(key=lambda x: x['date'], reverse=True)
           
-          # 生成报告卡片
-          for report in reports[:20]:  # 只显示最近20期
+          # 生成HTML
+          html_template = '''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>股市早报 - Stock Reports</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #0f172a;
+            --primary-light: #1e293b;
+            --accent: #3b82f6;
+            --accent-light: #60a5fa;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: #334155;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--primary);
+            color: var(--text);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+        
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, var(--primary-light) 0%, var(--primary) 100%);
+            border-bottom: 1px solid var(--border);
+            padding: 60px 20px;
+            text-align: center;
+        }
+        
+        .header-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, var(--accent-light), var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .header p {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+        }
+        
+        /* Stats */
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            margin-top: 32px;
+            flex-wrap: wrap;
+        }
+        
+        .stat {
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--accent-light);
+        }
+        
+        .stat-label {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+        
+        /* Container */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        
+        /* Section Title */
+        .section-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .section-title::before {
+            content: '';
+            width: 4px;
+            height: 24px;
+            background: var(--accent);
+            border-radius: 2px;
+        }
+        
+        /* Report Grid */
+        .report-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+            gap: 24px;
+        }
+        
+        /* Report Card */
+        .report-card {
+            background: var(--primary-light);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 28px;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            color: inherit;
+            display: block;
+        }
+        
+        .report-card:hover {
+            transform: translateY(-4px);
+            border-color: var(--accent);
+            box-shadow: 0 20px 40px rgba(59, 130, 246, 0.15);
+        }
+        
+        .report-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 16px;
+        }
+        
+        .report-date {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .report-badge {
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .badge-morning {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--success);
+        }
+        
+        .badge-evening {
+            background: rgba(245, 158, 11, 0.2);
+            color: var(--warning);
+        }
+        
+        .report-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 12px;
+            line-height: 1.4;
+        }
+        
+        .report-summary {
+            color: var(--text-muted);
+            font-size: 0.9375rem;
+            line-height: 1.6;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        
+        .report-footer {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--accent-light);
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+        
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-muted);
+            border-top: 1px solid var(--border);
+            margin-top: 60px;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.75rem;
+            }
+            
+            .stats {
+                gap: 24px;
+            }
+            
+            .report-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-icon">📈</div>
+        <h1>股市早报</h1>
+        <p>每日股市分析与投资策略</p>
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-value">''' + str(len(reports)) + '''</div>
+                <div class="stat-label">报告总数</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">''' + str(sum(1 for r in reports if r['is_morning'])) + '''</div>
+                <div class="stat-label">早报</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">''' + str(sum(1 for r in reports if not r['is_morning'])) + '''</div>
+                <div class="stat-label">晚报</div>
+            </div>
+        </div>
+    </header>
+    
+    <div class="container">
+        <h2 class="section-title">最新报告</h2>
+        <div class="report-grid">
+'''
+          
+          # 添加报告卡片
+          for report in reports[:12]:
               badge_class = 'badge-morning' if report['is_morning'] else 'badge-evening'
               badge_text = '早报' if report['is_morning'] else '晚报'
               
-              index_html += f'''
+              html_template += f'''
             <a href="{report['file']}" class="report-card">
-                <div class="report-date">{report['date']}</div>
+                <div class="report-header">
+                    <div class="report-date">📅 {report['date']}</div>
+                    <span class="report-badge {badge_class}">{badge_text}</span>
+                </div>
                 <div class="report-title">{report['title']}</div>
                 <div class="report-summary">{report['summary']}</div>
-                <span class="badge {badge_class}">{badge_text}</span>
+                <div class="report-footer">
+                    阅读全文 →
+                </div>
             </a>
 '''
           
-          index_html += '''
-        </div>
-        <div class="footer">
-            <p>© 2026 Stock Reports | Generated by AI Agent</p>
+          html_template += '''
         </div>
     </div>
+    
+    <footer class="footer">
+        <p>© 2026 Stock Reports | Generated by AI Agent</p>
+    </footer>
 </body>
 </html>
 '''
           
-          # 保存首页
           with open('_site/index.html', 'w', encoding='utf-8') as f:
-              f.write(index_html)
+              f.write(html_template)
           
           # 复制所有markdown文件并转换为HTML
+          md = markdown.Markdown(extensions=['tables', 'fenced_code'])
           for root, dirs, files in os.walk('.'):
+              if '.git' in root or '_site' in root:
+                  continue
               for file in files:
                   if file.endswith('.md'):
                       src = os.path.join(root, file)
                       dst_dir = os.path.join('_site', root)
                       os.makedirs(dst_dir, exist_ok=True)
                       
-                      # 简单markdown转HTML
                       with open(src, 'r', encoding='utf-8') as f:
                           md_content = f.read()
                       
-                      html_content = f'''<!DOCTYPE html>
+                      html_content = md.convert(md_content)
+                      md.reset()
+                      
+                      html_page = f'''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{file.replace('.md', '')}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            max-width: 900px;
-            margin: 0 auto;
-            padding: 40px 20px;
-            line-height: 1.8;
-            color: #333;
-        }}
-        h1 {{ color: #667eea; border-bottom: 3px solid #667eea; padding-bottom: 10px; }}
-        h2 {{ color: #764ba2; margin-top: 30px; }}
-        h3 {{ color: #555; }}
-        table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
-        th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
-        th {{ background: #667eea; color: white; }}
-        tr:nth-child(even) {{ background: #f9f9f9; }}
-        code {{ background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }}
-        pre {{ background: #f4f4f4; padding: 15px; border-radius: 8px; overflow-x: auto; }}
-        a {{ color: #667eea; }}
-        .back {{ margin-bottom: 20px; }}
-    </style>
+                        :root {{
+                            --primary: #0f172a;
+                            --primary-light: #1e293b;
+                            --accent: #3b82f6;
+                            --text: #f8fafc;
+                            --text-muted: #94a3b8;
+                            --border: #334155;
+                        }}
+                        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                        body {{
+                            font-family: 'Inter', sans-serif;
+                            background: var(--primary);
+                            color: var(--text);
+                            line-height: 1.8;
+                            padding: 40px 20px;
+                        }}
+                        .container {{
+                            max-width: 900px;
+                            margin: 0 auto;
+                            background: var(--primary-light);
+                            border: 1px solid var(--border);
+                            border-radius: 16px;
+                            padding: 40px;
+                        }}
+                        .back {{
+                            margin-bottom: 24px;
+                        }}
+                        .back a {{
+                            color: var(--accent);
+                            text-decoration: none;
+                            display: inline-flex;
+                            align-items: center;
+                            gap: 8px;
+                        }}
+                        h1 {{ color: var(--accent); font-size: 2rem; margin-bottom: 24px; }}
+                        h2 {{ color: var(--text); margin-top: 32px; margin-bottom: 16px; }}
+                        h3 {{ color: var(--text-muted); margin-top: 24px; margin-bottom: 12px; }}
+                        p {{ margin-bottom: 16px; }}
+                        table {{
+                            width: 100%;
+                            border-collapse: collapse;
+                            margin: 20px 0;
+                            background: var(--primary);
+                            border-radius: 8px;
+                            overflow: hidden;
+                        }}
+                        th, td {{
+                            padding: 12px 16px;
+                            text-align: left;
+                            border-bottom: 1px solid var(--border);
+                        }}
+                        th {{
+                            background: var(--accent);
+                            color: white;
+                            font-weight: 600;
+                        }}
+                        tr:hover {{
+                            background: rgba(59, 130, 246, 0.1);
+                        }}
+                        code {{
+                            background: var(--primary);
+                            padding: 2px 8px;
+                            border-radius: 4px;
+                            font-family: monospace;
+                        }}
+                        pre {{
+                            background: var(--primary);
+                            padding: 20px;
+                            border-radius: 8px;
+                            overflow-x: auto;
+                            margin: 16px 0;
+                        }}
+                        blockquote {{
+                            border-left: 4px solid var(--accent);
+                            padding-left: 20px;
+                            margin: 20px 0;
+                            color: var(--text-muted);
+                        }}
+                        ul, ol {{
+                            margin: 16px 0;
+                            padding-left: 24px;
+                        }}
+                        li {{
+                            margin-bottom: 8px;
+                        }}
+                    </style>
 </head>
 <body>
-    <div class="back"><a href="/">← 返回首页</a></div>
-    <pre>{md_content}</pre>
+    <div class="container">
+        <div class="back"><a href="/">← 返回首页</a></div>
+        {html_content}
+    </div>
 </body>
 </html>'''
                       
                       dst = os.path.join(dst_dir, file.replace('.md', '.html'))
                       with open(dst, 'w', encoding='utf-8') as f:
-                          f.write(html_content)
+                          f.write(html_page)
           
-          print("Static site generated successfully!")
+          print("✅ Static site generated successfully!")
+          print(f"📊 Total reports: {len(reports)}")
           EOF
 
       - name: Upload artifact
